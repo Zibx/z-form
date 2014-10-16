@@ -141,7 +141,10 @@
 				            }
 				            return Z.DOM.stopEvent(e);
 				        };
-				    Base.prototype = {
+				    Base.prototype = Z.extend( Z.Observable, {
+				        _initListeners: function(  ){
+				
+				        },
 				        focused: false,
 				        focusable: true,
 				        blurOnEnter: true,
@@ -224,7 +227,7 @@
 				            this._unbindListeners();
 				            this.blurElement && this.blurElement.parentNode.removeChild( this.blurElement );
 				        }
-				    };
+				    });
 				    Z.Form.Input.Base = Base;
 				
 				})();
