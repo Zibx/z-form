@@ -1,0 +1,26 @@
+{
+  "name": "z-form",
+  "version": "0.0.1",
+  "description": "z-form",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "z-lib": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zibx/z-form.git"
+  },
+  "keywords": [
+    "form",
+    "module"
+  ],
+  "author": "Zibx",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Zibx/z-form/issues"
+  },
+  "homepage": "https://github.com/Zibx/z-form"
+}
