@@ -117,16 +117,22 @@
 				 */
 				(function(  ){
 				    'use strict';
-				    var Z = require('z-lib');
+				    var Z = require('z-lib' ),
+				        View = require('z-view' ),
+				        DOM = require('z-lib-dom' ),
+				        Observable = require('z-observable' ),
+				        $Observable = Z.Observable.prototype;
 				    var Base = function( cfg ){
 				        Z.apply(this, cfg);
-				
+				        $Observable._init.call(this);
 				        this.emptyText = this.emptyText || Z.Locale.get('form.field.'+ this.type +'.emptyText', 'form.field.emptyText');
 				        this.disabledText = this.disabledText || Z.Locale.get('form.field.'+ this.type +'.disabledText', 'form.field.disabledText');
 				        this._setValue(this[this.valueProperty]);
-				
-				        this.draw();
 				        this._initListeners();
+				        this._draw();
+				        this._unbindListeners();
+				            Z.DOM.addListener(this.renderTo, 'click', Z.bind(this, '_mouseClick'));
+				
 				    },
 				        blurKeyDown = function( e ){
 				            var code = Z.DOM.getKeyCode(e);
@@ -141,10 +147,7 @@
 				            }
 				            return Z.DOM.stopEvent(e);
 				        };
-				    Base.prototype = Z.extend( Z.Observable, {
-				        _initListeners: function(  ){
-				
-				        },
+				    Base.prototype = Z.extend( $Observable, Z.extend( Z.View.Observable, {
 				        focused: false,
 				        focusable: true,
 				        blurOnEnter: true,
@@ -157,6 +160,18 @@
 				            this[this.valueProperty] = this.dataSetter(value);
 				            this._lastValue = value;
 				            this.setDisplayValue(value);
+				        },
+				        _bindListeners: function(  ){
+				            var listen = this[this.listenersProperty] = {
+				                windowBlur: Z.DOM.addListener(window, 'blur', Z.bind(this, 'blur')),
+				                windowClick: Z.DOM.addListener(document, 'click', Z.bind(this, 'blur')),
+				                //keyboard: js.util.Keyboard.attach(this)
+				            };
+				        },
+				        _draw: function(  ){
+				            this._unbindListeners();
+				            this.draw();
+				            this._bindListeners();
 				        },
 				        setDisplayValue: function( value ){
 				            this[this.displayValueProperty] = value;
@@ -226,8 +241,56 @@
 				        die: function(){
 				            this._unbindListeners();
 				            this.blurElement && this.blurElement.parentNode.removeChild( this.blurElement );
-				        }
-				    });
+				        },
+				        blur: function () {
+				            if( !this.focused || this.fire('tryBlur') === false )
+				                return false;
+				
+				            this.set('focused', false);
+				            this.state('view');
+				
+				            this.fire('blur');
+				            this._unbindListeners();
+				            if( this.focusValue !== this.value )
+				                this.fire( 'changed', this.getValue() );
+				
+				            return true;
+				        },
+				        _mouseClick: function (e) {
+				            !this.focused && this.focus( void 0 );
+				            e.stopPropagation();
+				        },
+				        focus: function (direction) {
+				            if (this.fire('tryFocus') === false || (this.disabled === true || this.enabled === false) )
+				                return false;
+				
+				            if (!this.focused)
+				                this.focusValue = this.value;
+				            this.set('focused', true);
+				            this.state('edit');
+				
+				            this.fire('focus');
+				
+				            return direction;
+				        },
+				        state: function (state) {
+				            this._unbindListeners();
+				            this.currentState = state;
+				
+				            if( this.inited ) {
+				                if (this.manualRefresh)
+				                    typeof this.manualRefresh === 'function' && this.manualRefresh();
+				                else
+				                    this._draw();
+				                if( state === 'edit' ){
+				                    this._bindListeners();
+				                    this.innerFocus();
+				                }
+				                this.fire('state', state);
+				                this.fire(state + 'State');
+				            }
+				        },
+				    }));
 				    Z.Form.Input.Base = Base;
 				
 				})();
@@ -273,7 +336,8 @@
 		"test.js": function (exports, module, require) {
 			var Form = require('./lib/form');
 			
-			new Form.Input.Text({renderTo: document.body, value: 123});
+			new Form.Input.Text({renderTo: document.getElementById('f1'), value: 123});
+			new Form.Input.Text({renderTo: document.getElementById('f2'), value: 456});
 		}
 	},
 	"z-lib": {
@@ -953,6 +1017,488 @@
 				    // get eval from its nest
 				    (1,eval)('this')
 				);
+			}
+		}
+	},
+	"z-lib-dom": {
+		":mainpath:": "lib/z-lib-dom.js",
+		"lib": {
+			"z-lib-dom.js": function (exports, module, require) {
+				(function() {
+				    var Z = require('z-lib');
+				    var DOM = Z.DOM = {
+				        init: function(){
+				            if (typeof window.addEventListener === 'function') {
+				                this.addListener = function (el, type, fn) {
+				                    el.addEventListener(type, fn, false);
+				                    return {remove: DOM.removeListener.bind(DOM, el, type, fn)};
+				                };
+				                this.removeListener = function (el, type, fn) {
+				                    el.removeEventListener(type, fn, false);
+				                };
+				            } else if (typeof document.attachEvent === 'function') { // IE
+				                this.addListener = function (el, type, fn) {
+				                    el.attachEvent('on' + type, fn);
+				                    return {remove: DOM.removeListener.bind(DOM, el, type, fn)};
+				                };
+				                this.removeListener = function (el, type, fn) {
+				                    el.detachEvent('on' + type, fn);
+				                };
+				            } else { // older browsers
+				                this.addListener = function (el, type, fn) {
+				                    el['on' + type] = fn;
+				                    return {remove: DOM.removeListener.bind(DOM, el, type, fn)};
+				                };
+				                this.removeListener = function (el, type) {
+				                    el['on' + type] = null;
+				                };
+				            }
+				        },
+				        stopEvent: function( e ){
+				            e.stopPropagation();
+				            e.preventDefault();
+				            return false;
+				        },
+				        keyCode: {
+				            backspace: 8,
+				            comma: 188,
+				            'delete': 46,
+				            'del': 46,
+				            down: 40,
+				            end: 35,
+				            enter: 13,
+				            escape: 27,
+				            home: 36,
+				            left: 37,
+				            numpad_add: 107,
+				            numpad_decimal: 110,
+				            numpad_divide: 111,
+				            numpad_enter: 108,
+				            numpad_multiply: 106,
+				            numpad_subtract: 109,
+				            page_down: 34,
+				            page_up: 33,
+				            period: 190,
+				            right: 39,
+				            space: 32,
+				            tab: 9,
+				            up: 38,
+				            any: -1
+				        },
+				        getKeyCode: function( e ){
+				            return String.fromCharCode(e.which || e.keyCode).toLowerCase().charCodeAt(0);
+				        },
+				        addOnceListener: function( el, type, fn ){
+				            var wrapFn = function(){
+				                window.DOM.removeListener(el, type, wrapFn);
+				                fn.apply( this, Array.prototype.slice.call( arguments ) );
+				            };
+				            this.addListener( el, type, wrapFn);
+				        },
+				        removeClass: function( el, name ){
+				            el.className = ((' '+el.className+' ').replace( ' '+name+' ', ' ')).trim();
+				        },
+				        addClass: function( el, name ){
+				            !this.hasClass( el, name ) && (el.className += ' '+ name);
+				        },
+				        hasClass: function( el, name ){
+				            return (' '+el.className+' ').indexOf( ' '+name+' ' ) > -1;
+				        },
+				        toggleClass: function( el, name ){
+				            this[ (this.hasClass(el, name) ? 'remove' : 'add' ) + 'Class' ]( el, name );
+				        },
+				        getOffset: function( target ){
+				            target = target || this.target;
+				            var left = this.pageX,
+				                top = this.pageY,
+				                width = target.offsetWidth,
+				                height = target.offsetHeight;
+				
+				            if (target.offsetParent) {
+				                do {
+				                    left -= target.offsetLeft;
+				                    top -= target.offsetTop;
+				                } while( target = target.offsetParent );
+				            }
+				            return [left, top, width, height];
+				        },
+				        getXY: function( e ){
+				            if ( e.pageX == null && e.clientX != null ) {
+				                DOM.getXY = function( e ){
+				                    var eventDoc = e.target.ownerDocument || document,
+				                        doc = eventDoc.documentElement,
+				                        body = eventDoc.body;
+				
+				                    return {
+				                        x: e.clientX + ( doc && doc.scrollLeft || body && body.scrollLeft || 0 ) - ( doc && doc.clientLeft || body && body.clientLeft || 0 ),
+				                        y: e.clientY + ( doc && doc.scrollTop  || body && body.scrollTop  || 0 ) - ( doc && doc.clientTop  || body && body.clientTop  || 0 )
+				                    };
+				                };
+				            }else{
+				                DOM.getXY = function( e ){
+				                    return {
+				                        x: e.pageX,
+				                        y: e.pageY
+				                    }
+				                };
+				            }
+				            return DOM.getXY( e );
+				        },
+				        _readyList: [],
+				        inited: false,
+				        ready: function( fn ){
+				            this._readyList.push(fn);
+				            this._ready();
+				        },
+				        _ready: function(  ){
+				            if( this.inited ){
+				                while( this._readyList.length ){
+				                    this._readyList.shift()();
+				                }
+				            }
+				        },
+				        tplRenderer: function( name ){
+				            var obj = new LogicTplUnit( w[name] );
+				            return function(data){return obj.f(data || {});};
+				        }
+				    };
+				    DOM.init();
+				    /*Z && Z.register('[object HTMLDivElement]', {
+				        addClass: function(name){
+				            for( var els = this.els, i = els.length; i; )
+				                DOM.addClass(els[--i], name);
+				            return this;
+				        },
+				        removeClass: function( name ){
+				            for( var els = this.els, i = els.length; i; )
+				                DOM.removeClass(els[--i], name);
+				            return this;
+				        },
+				        toggleClass: function( name ){
+				            for( var els = this.els, i = els.length; i; )
+				                DOM.toggleClass(els[--i], name);
+				            return this;
+				        },
+				        hasClass: function( name ){
+				            for( var els = this.els, i = els.length; i; )
+				                if( DOM.hasClass(els[--i], name) )
+				                    return true;
+				            return false;
+				        }
+				    });
+				    Z && Z.register('[object String]', {
+				
+				    }, function( el ){
+				        return Z(Array.prototype.slice.call(document.querySelectorAll(el)),'[object HTMLDivElement]');
+				    });
+				        //Z.selfy(DOM, 'addListener,removeListener,addOnceListener, addClass,removeClass,!hasClass,toggleClass,!getOffset'));
+				*/
+				    var readyFn = function(){
+				        DOM.inited = true;
+				        DOM._ready();
+				
+				    };
+				
+				
+				    function r( f ){
+				        /in/.test( document.readyState ) ? setTimeout( r.bind( null, f ), 90 ) : f()
+				    }
+				    r( readyFn );
+				
+				
+				    return DOM;
+				})();
+			}
+		}
+	},
+	"z-observable": {
+		":mainpath:": "lib/z-observable.js",
+		"lib": {
+			"z-observable.js": function (exports, module, require) {
+				/**
+				 * Created by Ivan on 10/19/2014.
+				 */
+				
+				(function(ClassLoader, js){
+				    'use strict';
+				    var Z = require('z-lib');
+				
+				    var slice = Array.prototype.slice;
+				    var eventBuilder = function( el, scope ){
+				        var out = [scope],
+				            txt = [], names = [], counter = 0, fireFn;
+				        Z.each( el.list, function( el ){
+				
+				            out.push( el.fn, el.caller );
+				            names.push( 'f'+ counter, 'c'+ counter );
+				            txt.push('f'+ counter +'.apply('+ 'c'+ counter + ', (data[dataLength] = c'+ counter+') && data) === false');
+				            counter++;
+				        });
+				        names.push('data');
+				        !el.plain && txt.reverse();
+				        fireFn = new Function(
+				            names.join(','),
+				            'var dataLength = data.length;return (' + txt.join('||')+')? false : this;'
+				        );
+				        el.fn = fireFn.bind.apply(fireFn, out);
+				    };
+				    var proto = {
+				        /*
+				         Function: _init
+				         Runs in class init. Adds uniq `eventList` object to class
+				
+				         */
+				        _init: function(){
+				            this.eventList = {};//this._EventList ? new this._EventList().eventList : {};
+				            this.on(this.listeners);
+				        },
+				        /*_initPrototype: function(  ){
+				            var tmp = function(){ this.eventList = {}; };
+				            tmp.prototype = proto;
+				
+				            this._EventList = function(){};
+				            this._EventList.prototype = { eventList: (new tmp()).on( this.listeners ).eventList };
+				        },*/
+				        /*
+				         Function: fireEvent (fire)
+				         Fires an event
+				
+				
+				
+				         Parameters:
+				         eventName - name of event
+				         args[ 1 .. inf ] - arguments to event callbacks
+				
+				         */
+				        fireEvent : function fire( eventName ) {
+				
+				            var data = slice.call( arguments, 1 ),
+				                event = this.eventList[ eventName ],
+				                allEvents = this.eventList[ '*' ],
+				                prevented;
+				
+				            //eventName !== 'mousemove' && console.log(eventName, data, this._className, this.innerEl, this.el);
+				            allEvents && allEvents.fn(slice.call( arguments ));
+				
+				            if( event )
+				                return event.fn( data );
+				            else{
+				                prevented = false;
+				                if( this.listeners && this.listeners[ eventName ] ){
+				                    event = [ { fn: this.listeners[ eventName ], caller: this } ];
+				                    var i, subscriber, dataLength = data.length;
+				
+				                    /*debug cut*/
+				                    /*if( event.length > 10 ){
+				                     console.warn('Strange event `'+ eventName +'`, ' + event.length + ' handlers attached')
+				                     }*//*/debug cut*/
+				                    for( i = event.length; i ; ){
+				                        subscriber = event[ --i ];
+				                        data[ dataLength ] = subscriber.caller;
+				                        prevented = prevented || subscriber.fn.apply( subscriber.caller || subscriber, data ) === false;
+				                    }
+				
+				                }
+				            }
+				
+				            return prevented ? false : this;
+				        },
+				        /* When you don't want this event to be fired too frequently.
+				           But it still would be fired on first call and last call would be done as well.*/
+				        fireSchedule: function( interval, eventName ){
+				            var eventList = this.eventList,
+				                event = eventList[ eventName ],
+				                date, nextCall;
+				            if( !event )
+				                return;
+				
+				            nextCall = event.nextCall;
+				
+				            date = (new Date()).valueOf();
+				            event.args = slice.call( arguments, 1 );
+				            if( !nextCall || nextCall <= date ){
+				                event.nextCall = date + interval;
+				                this.fire.apply( this, event.args );
+				            }else if( nextCall > date ){
+				                if( event.timeout )
+				                    return;
+				                event.timeout = setTimeout(function(){
+				                    event.timeout = void 0;
+				                    event.nextCall = date + interval;
+				                    this.fire.apply( this, event.args );
+				                }.bind(this), interval + 2 );
+				            }
+				        },
+				
+				        /*
+				         Function: on
+				
+				         Subscribe callback on event
+				
+				         Parameters:
+				         eventName - name of event
+				         fn - callback function
+				         [ caller = this ] - scope to call on ( default: this )
+				
+				         */
+				        on : function on( eventName, fn, caller ) {
+				            if( typeof eventName !== 'string' ){ // object of events
+				                for( var i in eventName ){
+				                    if( eventName.hasOwnProperty( i ) )
+				                        this.on( i, eventName[ i ] );
+				                }
+				            }else{
+				                if( eventName.indexOf(',') > -1 ){
+				                    Z.each( eventName.split(','), function( eventName ){
+				                        this.on( eventName.trim(), fn, caller );
+				                    }.bind(this) );
+				                }else{
+				                    var eventList = this.eventList,
+				                        data = {fn : fn, caller : caller || this };
+				
+				                    !eventList && (eventList = {});
+				                    (eventList[eventName] || ( eventList[eventName] = { list: [] } )).list.push( data );
+				                    eventList[eventName] = { list: eventList[eventName].list.slice() };
+				                    if( eventList[eventName].list.length > 10 ){
+				                        window.console.warn('Strange event `'+ eventName +'`, ' + eventList[ eventName ].length + ' handlers attached');
+				                    }/*/debug cut*/
+				                    eventBuilder( eventList[eventName], this );
+				                }
+				            }
+				            return this;
+				        },
+				
+				        once: function( name, fn, scope ){
+				            var wrap = function(){
+				                fn.apply(scope, Z.toArray(arguments));
+				                this.un(name, wrap);
+				            };
+				            this.on( name, wrap, this );
+				        },
+				        removableOn: function( eventName, fn, caller ){
+				            var wrap = function(){
+				                fn.apply(caller, Z.toArray(arguments));
+				            };
+				            this.on( eventName, wrap, this );
+				
+				            return {remove: function(  ){
+				                this.un(eventName, wrap);
+				            }.bind(this)};
+				
+				        },
+				        /*
+				         Function: un
+				
+				         Unsubscribe callback for event. It's important that fn shoul be same function pointer, that was pased in <on>
+				
+				         Parameters:
+				         eventName - name of event
+				         fn - callback function
+				
+				         */
+				        un : function un( eventName, fn ){
+				            var event = this.eventList[ eventName ],
+				                i, eventList;
+				
+				
+				
+				            if( event !== undefined )
+				                if( fn === undefined )
+				                    delete this.eventList[ eventName ];
+				                else{
+				                    for( eventList = event.list, i = eventList.length ; i ; )
+				                        if( eventList[ --i ].fn === fn )
+				                            eventList.splice( i, 1 );
+				
+				                    if( !eventList.length )
+				                        delete this.eventList[ eventName ];
+				                    else
+				                        eventBuilder( event, this );
+				                }
+				
+				
+				            return this;
+				        },
+				        /*
+				         Function: set
+				
+				         Set parameter with events
+				         */
+				
+				        set: function( param, value ){
+				            var oldValue = this[ param ];
+				            if( this.fireEvent( param + 'BeforeSet', value, oldValue ) === false )
+				                return false;
+				            this[ param ] = value;
+				            this.fireEvent( param + 'Set', value, oldValue );
+				            return value;
+				        },
+				
+				        _unbindListeners: function () {
+				            var listen = this[ arguments[0] || 'listen' ];
+				
+				            if (listen) {
+				                Z.each(listen, function() {
+				                    if (this && typeof this.remove == "function")
+				                        this.remove();
+				                    else if (typeof this === 'function')
+				                        this();
+				                });
+				            }
+				        },
+				
+				        _initListeners: function () {
+				            this.listen = {};
+				        }
+				    };
+				    proto.fire = proto.fireEvent;
+				    Z.Observable = function(){
+				        this._init();
+				    };
+				    Z.Observable.prototype = proto;
+				    return Z.Observable;
+				})();
+			}
+		}
+	},
+	"z-view": {
+		":mainpath:": "lib/z-view.js",
+		"lib": {
+			"z-view.js": function (exports, module, require) {
+				/**
+				 * Created by Ivan on 10/17/2014.
+				 */
+				(function(  ){
+				    'use strict';
+				    var Z = require('z-lib' ),
+				        DOM = require('z-lib-dom');
+				    var View = Z.View = function(  ){
+				
+				    };
+				    View.prototype = {};
+				    View.Observable = {
+				        listenersProperty: '_listen',
+				        _unbindListeners: function( listenersProperty ){
+				            var listen = this[ listenersProperty || this.listenersProperty],
+				                i, remove;
+				
+				            if (listen)
+				                for( i in listen )
+				                    listen.hasOwnProperty( i ) &&
+				                        (remove = listen[i]) &&
+				                            (
+				                                (typeof remove.remove === 'function' && remove.remove())
+				                                ||
+				                                (typeof remove === 'function' && remove)
+				                            );
+				
+				        },
+				
+				        _initListeners: function () {
+				            this[this.listenersProperty] = {};
+				        }
+				    }
+				})();
 			}
 		}
 	}
